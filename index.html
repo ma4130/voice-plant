@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#75d8ff" />
+    <meta name="description" content="声の大きさで植物を育てる30秒ゲーム" />
+    <title>声で育つ庭</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700;800&family=Zen+Maru+Gothic:wght@700;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <div class="sun" aria-hidden="true"></div>
+      <div class="cloud cloud-one" aria-hidden="true"></div>
+      <div class="cloud cloud-two" aria-hidden="true"></div>
+
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">✿</span>
+          <div>
+            <p>VOICE GARDEN</p>
+            <h1>声で育つ庭</h1>
+          </div>
+        </div>
+        <button class="icon-button" id="resetButton" type="button" aria-label="はじめから">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v6h6" /></svg>
+          <span>はじめから</span>
+        </button>
+      </header>
+
+      <section class="game" aria-label="声で植物を育てるゲーム">
+        <div class="status-row">
+          <div class="score-block">
+            <span>のこり</span>
+            <strong><output id="timeOutput">30</output><small>秒</small></strong>
+          </div>
+          <div class="stage-badge"><i id="liveDot"></i><span id="stageOutput">おやすみ中</span></div>
+          <div class="score-block score-right">
+            <span>さいこう記録</span>
+            <strong><output id="scoreOutput">18</output><small>%</small></strong>
+          </div>
+        </div>
+
+        <div class="garden" id="garden">
+          <div class="sparkles" aria-hidden="true"><span>✦</span><span>·</span><span>✧</span><span>✶</span><span>·</span></div>
+          <div class="sound-rings" id="soundRings" aria-hidden="true"><i></i><i></i><i></i></div>
+
+          <div class="plant" id="plant" role="img" aria-label="植物の成長度 18%">
+            <div class="flower flower-main"><span class="face">• ◡ •</span></div>
+            <div class="flower flower-small flower-left"></div>
+            <div class="flower flower-small flower-right"></div>
+            <div class="leaf leaf-left"></div>
+            <div class="leaf leaf-right"></div>
+            <div class="stem"></div>
+          </div>
+
+          <div class="soil" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="flower-count" id="flowerCount" aria-label="集めた花 1個">
+            <span class="active">✿</span><span>✿</span><span>✿</span><span>✿</span><span>✿</span>
+          </div>
+        </div>
+
+        <div class="control-card">
+          <div class="meter-head"><strong id="meterMessage">声の大きさ</strong><span aria-hidden="true">♫</span></div>
+          <div class="meter" role="meter" aria-label="声の大きさ" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span id="meterFill"></span><i></i>
+          </div>
+          <div class="meter-labels"><span>しずか</span><span>おおきい</span></div>
+
+          <button class="main-button" id="startButton" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8" /></svg>
+            <span>声をとどける</span>
+          </button>
+          <p class="hint" id="hint">ボタンを押してマイクを許可してください。</p>
+        </div>
+      </section>
+      <div class="foreground-grass" aria-hidden="true"></div>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
+
