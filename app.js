@@ -1,7 +1,7 @@
-const ROUND_SECONDS = 30;
+const ROUND_SECONDS = 10;
+const WAKE_WORD = 'そだって';
 
 const elements = {
-  start: document.querySelector('#startButton'),
   reset: document.querySelector('#resetButton'),
   time: document.querySelector('#timeOutput'),
   score: document.querySelector('#scoreOutput'),
@@ -14,16 +14,20 @@ const elements = {
   rings: document.querySelector('#soundRings'),
   hint: document.querySelector('#hint'),
   flowerCount: document.querySelector('#flowerCount'),
+  voiceTrigger: document.querySelector('#voiceTrigger'),
+  voiceKicker: document.querySelector('.voice-copy small'),
+  voicePhrase: document.querySelector('.voice-copy strong'),
 };
 
 let state = {
   playing: false,
   micStatus: 'idle',
+  keywordStatus: 'starting',
   growth: 18,
   bestGrowth: 18,
   level: 0,
   timeLeft: ROUND_SECONDS,
-  holding: false,
+  lastHeard: '',
 };
 
 let audioContext = null;
@@ -31,9 +35,12 @@ let stream = null;
 let analyser = null;
 let animationFrame = null;
 let roundTimer = null;
-let fallbackTimer = null;
 let previousFrame = 0;
 let micRequestId = 0;
+let recognition = null;
+let recognitionActive = false;
+let recognitionRestartTimer = null;
+let shouldListen = true;
 
 function stageName(growth) {
   if (growth >= 88) return '満開';
@@ -42,40 +49,68 @@ function stageName(growth) {
   return 'めばえ';
 }
 
+function growthToMeters(growth) {
+  return (growth / 50).toFixed(1);
+}
+
+function renderVoiceStatus() {
+  const { playing, keywordStatus } = state;
+  elements.voiceTrigger.classList.toggle('active', playing);
+  elements.voiceTrigger.classList.toggle('listening', !playing && keywordStatus === 'listening');
+  elements.voiceTrigger.classList.toggle('error', keywordStatus === 'denied' || keywordStatus === 'unsupported');
+
+  if (playing) {
+    elements.voiceKicker.textContent = 'ゲーム中';
+    elements.voicePhrase.textContent = '声で大きく育てよう';
+    elements.hint.textContent = '長く声を出すと、植物がぐんぐん育ちます。';
+    return;
+  }
+  if (keywordStatus === 'listening') {
+    elements.voiceKicker.textContent = '合言葉を言ってね';
+    elements.voicePhrase.textContent = '「そだって」';
+    elements.hint.textContent = state.lastHeard
+      ? `「${state.lastHeard}」と聞こえました。合言葉は「そだって」です。`
+      : 'マイクが合言葉を待っています。';
+  } else if (keywordStatus === 'denied') {
+    elements.voiceKicker.textContent = 'マイクが使えません';
+    elements.voicePhrase.textContent = 'マイクを許可して再読み込み';
+    elements.hint.textContent = 'アドレスバー左の設定から、マイクを許可してください。';
+  } else if (keywordStatus === 'unsupported') {
+    elements.voiceKicker.textContent = '音声の聞き取りに非対応です';
+    elements.voicePhrase.textContent = 'Chromeで開いてください';
+    elements.hint.textContent = 'この機能はGoogle Chromeの音声認識を使います。';
+  } else {
+    elements.voiceKicker.textContent = 'マイクを準備中';
+    elements.voicePhrase.textContent = 'すこし待ってね';
+    elements.hint.textContent = 'マイクを許可すると、自動で合言葉を待ちます。';
+  }
+}
+
 function render() {
-  const { growth, bestGrowth, level, timeLeft, playing, micStatus } = state;
+  const { growth, bestGrowth, level, timeLeft, playing, keywordStatus } = state;
   elements.time.textContent = timeLeft;
-  elements.score.textContent = Math.round(bestGrowth);
-  elements.stage.textContent = playing ? stageName(growth) : timeLeft === 0 ? 'そだちきった！' : 'おやすみ中';
-  elements.liveDot.classList.toggle('active', playing);
+  elements.score.textContent = growthToMeters(bestGrowth);
+  elements.stage.textContent = playing ? stageName(growth) : keywordStatus === 'listening' ? 'ことば待ち' : '準備中';
+  elements.liveDot.classList.toggle('active', playing || keywordStatus === 'listening');
 
   const scale = 0.42 + growth / 172;
   elements.plant.style.setProperty('--scale', scale);
   elements.plant.style.setProperty('--sway', `${level / 33}deg`);
-  elements.plant.setAttribute('aria-label', `植物の成長度 ${Math.round(growth)}%`);
+  elements.plant.setAttribute('aria-label', `植物の高さ ${growthToMeters(growth)}m`);
   elements.plant.classList.toggle('bloom-one', growth >= 48);
   elements.plant.classList.toggle('bloom-two', growth >= 68);
 
   elements.meterFill.style.width = `${level}%`;
   elements.meter.setAttribute('aria-valuenow', Math.round(level));
   elements.rings.style.opacity = playing ? Math.min(.82, .08 + level / 115) : 0;
-  elements.meterMessage.textContent = level > 55 ? 'いい声！' : level > 12 ? 'その調子！' : '声の大きさ';
+  elements.meterMessage.textContent = playing
+    ? level > 55 ? 'いい声！' : level > 12 ? 'その調子！' : '声の大きさ'
+    : keywordStatus === 'listening' ? '合言葉を聞いています' : 'マイクを準備中';
 
   const bloomCount = Math.min(5, Math.max(1, Math.ceil(bestGrowth / 20)));
   [...elements.flowerCount.children].forEach((flower, index) => flower.classList.toggle('active', index < bloomCount));
   elements.flowerCount.setAttribute('aria-label', `集めた花 ${bloomCount}個`);
-
-  const label = elements.start.querySelector('span');
-  elements.start.classList.toggle('holding', state.holding);
-  elements.start.disabled = micStatus === 'requesting';
-  if (!playing) label.textContent = timeLeft === 0 ? 'もう一度' : '声をとどける';
-  else if (micStatus === 'requesting') label.textContent = 'マイクを準備中…';
-  else if (micStatus === 'denied') label.textContent = state.holding ? 'そのまま！' : '押して育てる';
-  else label.textContent = '声を聞いています';
-
-  if (!playing) elements.hint.textContent = 'ボタンを押してマイクを許可してください。';
-  else if (micStatus === 'denied') elements.hint.textContent = 'マイクなしモード：ボタンを押し続けると育ちます。';
-  else elements.hint.textContent = '長く声を出すと、植物がぐんぐん育ちます。';
+  renderVoiceStatus();
 }
 
 function stopAudio() {
@@ -89,15 +124,87 @@ function stopAudio() {
   state.level = 0;
 }
 
-function finishRound() {
-  micRequestId += 1;
-  state.playing = false;
-  state.holding = false;
-  clearInterval(roundTimer);
-  clearInterval(fallbackTimer);
-  stopAudio();
-  state.micStatus = state.micStatus === 'denied' ? 'denied' : 'idle';
+function stopKeywordListening(permanent = false) {
+  clearTimeout(recognitionRestartTimer);
+  if (permanent) shouldListen = false;
+  if (recognitionActive) {
+    try { recognition.stop(); } catch { /* already stopping */ }
+  }
+  recognitionActive = false;
+}
+
+function scheduleKeywordRestart(delay = 650) {
+  clearTimeout(recognitionRestartTimer);
+  if (!shouldListen || state.playing) return;
+  recognitionRestartTimer = setTimeout(startKeywordListening, delay);
+}
+
+function createRecognition() {
+  if (recognition) return recognition;
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) return null;
+  recognition = new Recognition();
+  recognition.lang = 'ja-JP';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onstart = () => {
+    recognitionActive = true;
+    if (!state.playing) {
+      state.keywordStatus = 'listening';
+      render();
+    }
+  };
+  recognition.onresult = (event) => {
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const transcript = event.results[index][0].transcript.replace(/\s/g, '');
+      if (!transcript) continue;
+      state.lastHeard = transcript;
+      render();
+      if (transcript.includes(WAKE_WORD) || transcript.includes('育って')) {
+        startRound();
+        break;
+      }
+    }
+  };
+  recognition.onerror = (event) => {
+    recognitionActive = false;
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      shouldListen = false;
+      state.keywordStatus = 'denied';
+      render();
+      return;
+    }
+    if (!state.playing) {
+      state.keywordStatus = 'starting';
+      render();
+      scheduleKeywordRestart(900);
+    }
+  };
+  recognition.onend = () => {
+    recognitionActive = false;
+    scheduleKeywordRestart();
+  };
+  return recognition;
+}
+
+function startKeywordListening() {
+  if (state.playing || recognitionActive) return;
+  shouldListen = true;
+  const keywordRecognition = createRecognition();
+  if (!keywordRecognition) {
+    state.keywordStatus = 'unsupported';
+    shouldListen = false;
+    render();
+    return;
+  }
+  state.keywordStatus = 'starting';
   render();
+  try {
+    keywordRecognition.start();
+  } catch {
+    scheduleKeywordRestart(900);
+  }
 }
 
 function readMicrophone(timestamp) {
@@ -121,18 +228,6 @@ function readMicrophone(timestamp) {
   animationFrame = requestAnimationFrame(readMicrophone);
 }
 
-function startFallback() {
-  clearInterval(fallbackTimer);
-  fallbackTimer = setInterval(() => {
-    if (!state.playing) return;
-    const change = state.holding ? 1.35 : -.24;
-    state.growth = Math.min(100, Math.max(8, state.growth + change));
-    state.bestGrowth = Math.max(state.bestGrowth, state.growth);
-    state.level = state.holding ? 72 : 0;
-    render();
-  }, 90);
-}
-
 async function startMicrophone() {
   const requestId = ++micRequestId;
   state.micStatus = 'requesting';
@@ -143,7 +238,7 @@ async function startMicrophone() {
     });
     if (requestId !== micRequestId || !state.playing) {
       requestedStream.getTracks().forEach((track) => track.stop());
-      return;
+      return false;
     }
     stream = requestedStream;
     audioContext = new AudioContext();
@@ -154,21 +249,27 @@ async function startMicrophone() {
     state.micStatus = 'active';
     previousFrame = performance.now();
     animationFrame = requestAnimationFrame(readMicrophone);
+    return true;
   } catch {
-    if (requestId !== micRequestId || !state.playing) return;
+    if (requestId !== micRequestId) return false;
+    state.playing = false;
     state.micStatus = 'denied';
-    startFallback();
+    state.keywordStatus = 'denied';
+    shouldListen = false;
+    render();
+    return false;
   }
-  render();
 }
 
-function startRound() {
-  stopAudio();
+async function startRound() {
+  if (state.playing) return;
   clearInterval(roundTimer);
-  clearInterval(fallbackTimer);
-  state = { playing: true, micStatus: 'idle', growth: 18, bestGrowth: 18, level: 0, timeLeft: ROUND_SECONDS, holding: false };
+  stopAudio();
+  state = { playing: true, micStatus: 'idle', keywordStatus: 'paused', growth: 18, bestGrowth: 18, level: 0, timeLeft: ROUND_SECONDS, lastHeard: WAKE_WORD };
+  stopKeywordListening(true);
   render();
-  startMicrophone();
+  const microphoneReady = await startMicrophone();
+  if (!microphoneReady) return;
   roundTimer = setInterval(() => {
     state.timeLeft -= 1;
     if (state.timeLeft <= 0) {
@@ -178,35 +279,36 @@ function startRound() {
   }, 1000);
 }
 
+function finishRound() {
+  micRequestId += 1;
+  state.playing = false;
+  state.keywordStatus = 'starting';
+  state.lastHeard = '';
+  clearInterval(roundTimer);
+  stopAudio();
+  render();
+  shouldListen = true;
+  scheduleKeywordRestart(900);
+}
+
 function resetGame() {
   micRequestId += 1;
   clearInterval(roundTimer);
-  clearInterval(fallbackTimer);
   stopAudio();
-  state = { playing: false, micStatus: 'idle', growth: 18, bestGrowth: 18, level: 0, timeLeft: ROUND_SECONDS, holding: false };
+  stopKeywordListening();
+  state = { playing: false, micStatus: 'idle', keywordStatus: 'starting', growth: 18, bestGrowth: 18, level: 0, timeLeft: ROUND_SECONDS, lastHeard: '' };
+  shouldListen = true;
   render();
+  scheduleKeywordRestart(350);
 }
 
-function setHolding(value) {
-  if (!state.playing || state.micStatus !== 'denied') return;
-  state.holding = value;
-  render();
-}
-
-elements.start.addEventListener('click', () => {
-  if (!state.playing) startRound();
-});
-elements.start.addEventListener('pointerdown', () => setHolding(true));
-elements.start.addEventListener('pointerup', () => setHolding(false));
-elements.start.addEventListener('pointerleave', () => setHolding(false));
-elements.start.addEventListener('keydown', (event) => {
-  if (event.code === 'Space' && state.micStatus === 'denied') { event.preventDefault(); setHolding(true); }
-});
-elements.start.addEventListener('keyup', (event) => {
-  if (event.code === 'Space') setHolding(false);
-});
 elements.reset.addEventListener('click', resetGame);
-window.addEventListener('pagehide', stopAudio);
+window.addEventListener('pagehide', () => {
+  shouldListen = false;
+  stopKeywordListening(true);
+  stopAudio();
+});
 
 render();
+startKeywordListening();
 
